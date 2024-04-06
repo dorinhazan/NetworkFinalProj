@@ -48,7 +48,7 @@ class ClientMain:
                 if self.tcp_socket in readable:
                     message = self.tcp_socket.recv(1024).decode().strip()
                     if message:
-                        print(f"Received message: {message}")
+                        print(message)
 
                         if "True or false" in message:
                             answer = input("Your answer (Y/N): ").strip().upper()

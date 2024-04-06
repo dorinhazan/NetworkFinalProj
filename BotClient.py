@@ -1,9 +1,10 @@
 import random
-from ClientMain import ClientMain  # Assuming ClientMain is in the same directory or correctly imported
+import select
+
+from ClientMain import ClientMain
 
 class BotClient(ClientMain):
     def __init__(self, name):
-        # Call the superclass constructor to initialize inherited properties
         super().__init__(name)
 
     def game_mode(self):
@@ -14,12 +15,12 @@ class BotClient(ClientMain):
                 if self.tcp_socket in readable:
                     message = self.tcp_socket.recv(1024).decode().strip()
                     if message:
-                        print(f"[Bot {self.name}] Received message: {message}")
+                        print(f"{self.name} {message}")
 
                         if "True or false" in message:
                             # Randomly choose an answer
                             answer = random.choice(['Y', 'N'])
-                            print(f"[Bot {self.name}] Auto-answering: {answer}")
+                            print(f"{self.name} answer: {answer}")
                             self.tcp_socket.sendall(answer.encode())
                     else:
                         break
@@ -31,6 +32,6 @@ class BotClient(ClientMain):
 
 # Example usage
 if __name__ == "__main__":
-    bot_name = "Bot_" + str(random.randint(1, 100))  # Randomly generate a bot name
+    bot_name = "BOT:" + str(random.randint(1, 100))
     bot = BotClient(bot_name)
     bot.run()

@@ -111,6 +111,7 @@ class ServerMain:
                 else:
                     players_list = players_names[0]
                 message = f"Round {round_number}, played by {players_list}:{question}"
+                print(f'type(message) {type(message)}')
 
             self.broadcast_question(active_players, message)
 
@@ -132,7 +133,6 @@ class ServerMain:
             print("No winners.")
 
     def broadcast_question(self, active_players, message):
-        print(f'message {message}')
         """Sends the trivia question to all active players."""
         for addr, (player_name, client_socket) in active_players.items():
             try:
@@ -163,29 +163,38 @@ class ServerMain:
         """Evaluates the collected answers and updates the list of active players, with specific output formatting."""
         winners = []
         # Temporarily store messages to decide if we append "Wins!" for a single winner
-        result_messages = []
+        result_messages = {}
 
         # Evaluate each answer and prepare their result message
-        for conn, answer in answers.items():
+        for addr, answer in answers.items():
             if correct_answer == answer:
-                winners.append(conn)
-                result_messages.append(f"{active_players[conn][0]} is correct!")
+                winners.append(addr)
+                result_messages[addr] =(f"{active_players[addr][0]} is correct!")
             else:
-                result_messages.append(f"{active_players[conn][0]} is incorrect!")
-                del active_players[conn]  # Remove player if they answered incorrectly
+                result_messages[addr] =(f"{active_players[addr][0]} is incorrect!")
+                del active_players[addr]  # Remove player if they answered incorrectly
 
         # Determine if a single winner message needs to be adjusted
         if len(winners) == 1:
             # If there's only one winner, append "Wins!" to their message
-            winner_name = active_players[winners[0]][0]
-            for i, msg in enumerate(result_messages):
-
-                if winner_name in msg:
-                    result_messages[i] = msg + " " + winner_name + " Wins!"
+            # winner_name = active_players[winners[0]][0]
+            # for i, msg in enumerate(result_messages):
+            #
+            #     if winner_name in msg:
+            #         result_messages[i] = msg + " " + winner_name + " Wins!"
+            winner_addr = winners[0]
+            winner_name, _ = active_players[winner_addr]
+            result_messages[winner_addr] += f' {winner_name} Wins!\n'  # Append "Wins!" to the winner's message
 
         # Print all result messages
-        for msg in result_messages:
-            print(msg)
+        for addr, msg in result_messages.items():
+            _, client_socket = self.clients[addr]
+            try:
+                client_socket.sendall(msg.encode('utf-8'))
+            except Exception as e:
+                # print(f"Failed to send result message to {player_name}: {e}")
+
+                print(f"Failed to send result message to : {e}")
 
         return winners, active_players
 
