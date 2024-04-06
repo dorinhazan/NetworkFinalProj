@@ -1,7 +1,7 @@
 import random
 
 class TriviaQuestionManager:
-    def _init_(self):
+    def __init__(self):
         self.questions = [
             {"text": "Moses was the first king of Israel.", "is_true": False},
             {"text": "David defeated Goliath with a sling and a stone.", "is_true": True},
@@ -30,7 +30,3 @@ class TriviaQuestionManager:
         question = random.choice(self.questions)
         return question["text"], question["is_true"]
 
-# Example usage:
-trivia_manager = TriviaQuestionManager()
-question_text, is_true = trivia_manager.get_random_question()
-print(f"Question: {question_text}\nAnswer: {'True' if is_true else 'False'}")
