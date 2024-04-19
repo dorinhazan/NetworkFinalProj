@@ -57,7 +57,8 @@ class ClientMain:
 
         udp_socket.bind(('', 13117))  # Assuming 13117 is the broadcast port
 
-        print(f"{Colors.GREEN}Client started, listening for offer requests...")
+
+        print(f"{Colors.PASTEL_GREEN}Client started, listening for offer requests...")
 
         while True:
             data, addr = udp_socket.recvfrom(1024)
@@ -69,7 +70,8 @@ class ClientMain:
                 self.server_port = server_port
 
                 print(
-                    f"{Colors.BLUE} Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
+
+                    f"Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
 
                 udp_socket.close()
                 break
@@ -93,7 +95,7 @@ class ClientMain:
                 if self.tcp_socket in readable:
                     message = self.tcp_socket.recv(1024).decode().strip()
                     if message:
-                        print(message)
+                        print(f"\n{message}")
                         if "you did not respond in time!" in message:
                             continue
                         if "Game over!" in message:

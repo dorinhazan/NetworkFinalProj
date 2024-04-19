@@ -20,7 +20,7 @@ class BotClient(ClientMain):
                 if self.tcp_socket in readable:
                     message = self.tcp_socket.recv(1024).decode().strip()
                     if message:
-                        print(message)
+                        print(f"\n{message}\n")
                         if "Game over!" in message:
                             game_over_received = True
                             break
@@ -36,7 +36,8 @@ class BotClient(ClientMain):
         except Exception as e:
             print(f"{Colors.RED}[Bot {self.name}] An error occurred: {e}")
         finally:
-            print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
+
+            print(f"{Colors.END}Server disconnected, listening for offer requests...")
 
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
