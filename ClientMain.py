@@ -134,5 +134,4 @@ class ClientMain:
 if __name__ == "__main__":
     client = ClientMain()
     client.run()
-    print("hi")
 
