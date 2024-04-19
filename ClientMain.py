@@ -4,6 +4,8 @@ import struct
 import random
 import time
 from inputimeout import inputimeout
+from Colors import Colors
+
 
 
 class ClientMain:
@@ -51,11 +53,12 @@ class ClientMain:
         try:
             udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except AttributeError:
-            print("SO_REUSEPORT is not supported on this platform. Continuing with SO_REUSEADDR only.")
+            print(f"{Colors.RED}SO_REUSEPORT is not supported on this platform. Continuing with SO_REUSEADDR only.")
 
         udp_socket.bind(('', 13117))  # Assuming 13117 is the broadcast port
 
-        print("Client started, listening for offer requests...")
+        print(f"{Colors.GREEN}Client started, listening for offer requests...")
+
         while True:
             data, addr = udp_socket.recvfrom(1024)
             magic_cookie, message_type = struct.unpack('!Ib', data[:5])
@@ -66,7 +69,8 @@ class ClientMain:
                 self.server_port = server_port
 
                 print(
-                    f"Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
+                    f"{Colors.BLUE} Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
+
                 udp_socket.close()
                 break
 
@@ -77,7 +81,8 @@ class ClientMain:
         try:
             self.tcp_socket.sendall((self.name + '\n').encode())
         except Exception as e:
-            print(f"Error communicating with server: {e}")
+            print(f"{Colors.RED}Error communicating with server: {e}")
+
 
     def game_mode(self):
         """Enters game mode - sending answers and receiving questions."""
@@ -102,16 +107,19 @@ class ClientMain:
                                 if answer in ['Y', '1', 'T', 'N', '0', 'F']:
                                     pass
                                 else:
-                                    print("Invalid input. Please insert Y/1/T - for True || N/0/F - for False")
+                                    print(f"{Colors.YELLOW}Invalid input. Please insert Y/1/T - for True || N/0/F - for False")
+
                             except Exception as e:
                                 answer = 'no answer'
                             finally:
                                 self.tcp_socket.sendall(answer.encode())
         except Exception as e:
-            print(f"An error occurred: {e}")
+
+            print(f"{Colors.RED}An error occurred: {e}")
 
         finally:
-            print("Server disconnected, listening for offer requests...")
+            print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
+
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
 
@@ -124,7 +132,8 @@ class ClientMain:
                 self.connect_to_server()
                 self.game_mode()
             except Exception as e:
-                print(f"Error encountered: {e}. Attempting to reconnect...")
+                print(f"{Colors.RED}Error encountered: {e}. Attempting to reconnect...")
+
                 if self.tcp_socket:
                     self.tcp_socket.close()  # Ensure the socket is closed before retrying
                 time.sleep(2)

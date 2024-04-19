@@ -2,6 +2,7 @@ import random
 import select
 import time
 from ClientMain import ClientMain
+from Colors import Colors
 
 
 
@@ -25,7 +26,6 @@ class BotClient(ClientMain):
                             break
                         if "True or false" in message:
                             # Start a timer for 10 seconds to wait for an answer
-                            print(f'bot:{self.name}')
 
                             start_time = time.time()
                             while (time.time() - start_time) < 10:
@@ -34,21 +34,25 @@ class BotClient(ClientMain):
                                 self.tcp_socket.sendall(answer.encode())
                                 break
         except Exception as e:
-            print(f"[Bot {self.name}] An error occurred: {e}")
+            print(f"{Colors.RED}[Bot {self.name}] An error occurred: {e}")
         finally:
-            print(f"Server disconnected, listening for offer requests...")
+            print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
+
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
 
     def run(self):
         while True:
+            time.sleep(1)
+
             try:
                 self.name = "Bot:" + random.choice(self.player_names)
                 self.listen_for_udp_broadcast()
                 self.connect_to_server()
                 self.game_mode()
             except Exception as e:
-                print(f"Error encountered: {e}. Attempting to reconnect...")
+                print(f"{Colors.RED}Error encountered: {e}. Attempting to reconnect...")
+
                 if self.tcp_socket:
                     self.tcp_socket.close()  # Ensure the socket is closed before retrying
 
