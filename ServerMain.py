@@ -1,12 +1,13 @@
 import socket
 import threading
+from threading import Timer
 import time
 import random
 from struct import pack
-
-# Assuming TriviaQuestionManager is implemented elsewhere
+from concurrent.futures import ThreadPoolExecutor
+from Colors import Colors
+from GameStatistics import GameStatistics
 from TriviaQuestionManager import TriviaQuestionManager
-
 
 class ServerMain:
     def __init__(self, port=13117):
@@ -16,102 +17,114 @@ class ServerMain:
         self.tcp_port = random.randint(1024, 65535)
         base_server_name = "Team Mystic"
         self.server_name = base_server_name.ljust(32)
-
+        self.broadcasting = True  # New attribute to control broadcasting
         self.game_active = False
+        self.player_names_server = []
+        self.game_stats = GameStatistics()
+        self.add_number = list(range(1, 501))
+        self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load
+        self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
+
+
 
     def start_udp_broadcast(self):
-        """Broadcasts server presence via UDP."""
-        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        """Modified to continuously broadcast using the current TCP port."""
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as udp_socket:
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-        # print(f"Team Mystic starts their server. Server started, listening on IP address {socket.gethostbyname(socket.gethostname())}")
-        message = pack('!Ib32sH', 0xabcddcba, 0x2, self.server_name.encode('utf-8'), self.tcp_port)
+            while self.broadcasting:
+                # Repack the message with the current TCP port
+                message = pack('!Ib32sH', 0xabcddcba, 0x2, self.server_name.encode('utf-8'), self.tcp_port)
+                udp_socket.sendto(message, ('<broadcast>', self.udp_broadcast_port))
+                time.sleep(2)
+    def accept_tcp_connections(self):
+        """Accepts TCP connections from clients using a ThreadPoolExecutor."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_socket:
+            bound = False
+            attempts = 0
+            while not bound and attempts < 50:
+                try:
+                    tcp_socket.bind(('', self.tcp_port))
+                    tcp_socket.listen()
+                    print(f"{Colors.GREEN}Server started, listening on IP address {socket.gethostbyname(socket.gethostname())}")
+                    bound = True
+                except socket.error as e:
+                    print(f"{Colors.YELLOW}Port {self.tcp_port} is in use or cannot be bound. Trying another port...")
+                    self.tcp_port = random.randint(1024, 65535)
+                    attempts += 1
+
+            if not bound:
+                print(f"{Colors.RED}Failed to bind to a port after several attempts. Exiting.")
+
+                return
+
+            self.wait_for_first_connection(tcp_socket)
+
+    def wait_for_first_connection(self, tcp_socket):
+        """Waits for the first connection and starts a timer for accepting more connections."""
+        first_client_connected = False
+
+        def stop_accepting_new_connections():
+            self.game_active = True
+            self.manage_game_rounds()
 
         while not self.game_active:
-            udp_socket.sendto(message, ('<broadcast>', self.udp_broadcast_port))
-
-            time.sleep(1)
-        udp_socket.close()
-
-    def accept_tcp_connections(self):
-        """Accepts TCP connections from clients, adjusting the logic to wait for 10 seconds after the first connection."""
-        bound = False
-        attempts = 0
-        waiting_for_players = True
-
-        while not bound and attempts < 5:
-            try:
-                tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                tcp_socket.bind(('', self.tcp_port))
-                tcp_socket.listen(5)  # Listen with a queue of 5
-
-                print(
-                    f"Server started, listening on IP address {socket.gethostbyname(socket.gethostname())} on port {self.tcp_port}")
-                bound = True
-            except socket.error as e:
-                print(f"Port {self.tcp_port} is in use or cannot be bound. Trying another port...")
-                self.tcp_port = random.randint(1024, 65535)
-                attempts += 1
-
-        if not bound:
-            print("Failed to bind to a port after several attempts. Exiting.")
-            return
-
-        print("Waiting for the first player to join...")
-        tcp_socket.settimeout(None)  # Block indefinitely until the first client connects
-
-        while waiting_for_players:
+            tcp_socket.settimeout(1)  # Short timeout to periodically check if game has started
             try:
                 client_socket, addr = tcp_socket.accept()
-                # Receive the client's name sent after the connection
-                # client_name = client_socket.recv(1024).decode().strip()
-
-                # Store the client's socket object along with the name
-                # self.clients[addr] = (client_name, client_socket)
-
-                client_thread = threading.Thread(target=self.handle_client, args=(client_socket, addr))
-                client_thread.start()
-                if waiting_for_players:  # If this is the first player to join
-                    start_time = time.time()
-                    waiting_for_players = False
-                    tcp_socket.settimeout(10)  # Now, wait only up to 10 seconds for subsequent connections
+                self.executor.submit(self.handle_client, client_socket, addr)
+                if not first_client_connected:
+                    first_client_connected = True
+                    Timer(10.0, stop_accepting_new_connections).start()
             except socket.timeout:
-                print("10-second window is up. No more players can join.")
-                break
-        self.game_active = True
-        self.manage_game_rounds()
+                continue
 
     def handle_client(self, client_socket, addr):
-
         """Handles communication with a connected client."""
-        player_name = client_socket.recv(1024).decode().strip()
-        self.clients[addr] = (player_name,client_socket)
+        try:
+            player_name = client_socket.recv(1024).decode().strip()
+            with self.player_names_server_lock:  # Use the lock when accessing the shared resource
+                if not self.check_name_unique(player_name):
+                    player_name = player_name + str(self.add_number[0])
+                    self.add_number = self.add_number[1:]
+                    self.clients[addr] = (player_name, client_socket)
+                    self.player_names_server.append(player_name)
+                self.clients[addr] = (player_name, client_socket)
+                self.player_names_server.append(player_name)
 
+
+        except Exception as e:
+            print(f"{Colors.RED}Failed to handle client {addr}: {e}")
+
+
+    def check_name_unique(self, name):
+        """Checks if the received name is unique."""
+        if name not in self.player_names_server:
+            return True
+        return False
 
 
     def manage_game_rounds(self):
         """Manages the game rounds, ensuring the game continues until there is only one winner."""
         active_players = self.clients.copy()  # Copy the current clients as active players for this round
-        # active_players = {addr: client for addr, client in self.clients.items() if client[1]}
         round_number = 1
 
-        # while len(active_players) > 1:
         while len(active_players) >= 1:
             question, correct_answer = self.trivia_manager.get_random_question()
-            question ="\nTrue or false: " + question
+            question =f'\n{Colors.BOLD}True or false: {question}\n\n'
             if round_number == 1:
-                message = f"Welcome to the Mystic server, where we are answering trivia questions about Aston Villa FC.\n"
+                message = f"{Colors.PURPLE}Welcome to the Mystic server, where we are answering trivia questions about the Bible.\n"
                 for idx, player_name in enumerate(self.clients.values(), start=1):
-                    message += f"Player {idx}: {player_name[0]}\n"
+                    message += f"{Colors.UNDERLINE}Player {idx}: {player_name[0]}\n"
                 message += "=="+ question
             else:
                 players_names = list(active_players.values())
+                players_names = [name for name, _ in players_names]
                 if len(players_names) > 1:
                     players_list = ', '.join(players_names[:-1]) + ' and ' + players_names[-1]
                 else:
                     players_list = players_names[0]
-                message = f"Round {round_number}, played by {players_list}:{question}"
-                print(f'type(message) {type(message)}')
+                message = f"\n\nRound {round_number}, played by {players_list}:\n{question}"
 
             self.broadcast_question(active_players, message)
 
@@ -119,18 +132,25 @@ class ServerMain:
             answers = self.collect_answers(active_players)
             winners, active_players = self.evaluate_answers(answers, active_players, correct_answer)
 
-            # if len(active_players) > 1:
-            if len(active_players) >= 1 and len(winners) == 0:
-                print(f"Moving to Round {round_number + 1}")
+            if len(active_players) == 1 and len(winners) == 0:
+                round_number += 1
+            elif len(active_players) > 1 and len(winners)>1:
+                round_number += 1
+            elif len(active_players)==2  and len(winners)==1:
                 round_number += 1
             else:
                 break  # Exit loop if one player is left
 
-        # Announce game winner
         if active_players:
             self.announce_winner(active_players.keys())  # Announce to all clients
         else:
-            print("No winners.")
+            no_winners_message = f"\nGame over!\nNo winners"
+            for addr, (_, client_socket) in self.clients.items():
+                try:
+                    client_socket.sendall(no_winners_message.encode('utf-8'))
+                except Exception as e:
+                    print(f"{Colors.RED}Failed to announce there are no winners to {self.clients[addr][0]}: {e}")
+        self.game_over()
 
     def broadcast_question(self, active_players, message):
         """Sends the trivia question to all active players."""
@@ -138,85 +158,102 @@ class ServerMain:
             try:
                 client_socket.sendall(message.encode('utf-8'))
             except Exception as e:
-                print(f"Error broadcasting question to player {player_name} at {addr}: {e}")
+                print(f"{Colors.RED}Error broadcasting question to player {player_name} at {addr}: {e}")
+
+
 
     def collect_answers(self, active_players):
         """Collects answers from each active player within a specified timeout."""
         answers = {}
         for addr, (player_name, client_socket) in active_players.items():
-            client_socket.settimeout(10)  # 10 seconds to answer
             try:
                 data = client_socket.recv(1024).decode('utf-8').strip().upper()
-
                 if data in ['Y', 'T', '1']:  # Interpreted as True
                     answers[addr] = True
                 elif data in ['N', 'F', '0']:  # Interpreted as False
                     answers[addr] = False
-            except socket.timeout:
-                print(f"{player_name} did not respond in time.")
-                answers[addr] = None
+                else:
+                    answers[addr] = None
             except Exception as e:
-                print(f"Error collecting answer from {player_name}: {e}")
+                print(f"{Colors.RED}Failed to receive answer from {player_name}:{e}")
+
         return answers
 
     def evaluate_answers(self, answers, active_players, correct_answer):
         """Evaluates the collected answers and updates the list of active players, with specific output formatting."""
         winners = []
-        # Temporarily store messages to decide if we append "Wins!" for a single winner
         result_messages = {}
 
-        # Evaluate each answer and prepare their result message
+        # First, compile the correctness of each answer
         for addr, answer in answers.items():
             if correct_answer == answer:
                 winners.append(addr)
-                result_messages[addr] =(f"{active_players[addr][0]} is correct!")
+                result_messages[addr] = f"{active_players[addr][0]} is correct!"
+            elif answer is None:
+                result_messages[addr] = f"{active_players[addr][0]} did not respond on time!"
             else:
-                result_messages[addr] =(f"{active_players[addr][0]} is incorrect!")
-                del active_players[addr]  # Remove player if they answered incorrectly
+                result_messages[addr] = f"{active_players[addr][0]} is incorrect!"
+                # Instead of deleting here, we will handle incorrect players later
 
-        # Determine if a single winner message needs to be adjusted
+        # Determine the winner(s) and append "Wins!" if there's a single winner
         if len(winners) == 1:
-            # If there's only one winner, append "Wins!" to their message
-            # winner_name = active_players[winners[0]][0]
-            # for i, msg in enumerate(result_messages):
-            #
-            #     if winner_name in msg:
-            #         result_messages[i] = msg + " " + winner_name + " Wins!"
             winner_addr = winners[0]
-            winner_name, _ = active_players[winner_addr]
-            result_messages[winner_addr] += f' {winner_name} Wins!\n'  # Append "Wins!" to the winner's message
+            winner_name = active_players[winner_addr][0]
+            # Add a winning note to the winner's message
+            result_messages[winner_addr] += f" {winner_name} Wins!"
 
-        # Print all result messages
-        for addr, msg in result_messages.items():
-            _, client_socket = self.clients[addr]
+        # Compile the broadcast message from individual messages
+        broadcast_message = "\n".join(result_messages.values())
+
+        # Remove players who answered incorrectly from active_players for the next round
+        for addr in list(
+                active_players.keys()):  # Convert to list to avoid 'dictionary changed size during iteration' error
+            if addr not in winners:
+                del active_players[addr]
+
+        # Broadcast the message to all remaining players
+        for addr in self.clients.keys():
             try:
-                client_socket.sendall(msg.encode('utf-8'))
+                client_socket = self.clients[addr][1]
+                client_socket.sendall(broadcast_message.encode('utf-8'))
             except Exception as e:
-                # print(f"Failed to send result message to {player_name}: {e}")
+                print(f"{Colors.RED}Failed to send result message: {self.clients[addr][0]} {e}")
 
-                print(f"Failed to send result message to : {e}")
 
         return winners, active_players
 
-    def announce_winner(self, winner_conns):
+
+
+    def announce_winner(self, winner_addr):
+        winner_addr_tuple = list(winner_addr)[0]
         """Announces the winner to all clients."""
-        # Assuming winner_conn is a single winner's address tuple
-        for winner_conn in winner_conns:  # Iterate over each winner address
-            if winner_conn in self.clients:
-                winner_name, _ = self.clients[winner_conn]
-                winner_message = f"Game over! Congratulations to the winner: {winner_name}"
-                for addr, (_, client_socket) in self.clients.items():
-                    try:
-                        client_socket.sendall(winner_message.encode('utf-8'))
-                    except Exception as e:
-                        print(f"Failed to announce winner to {self.clients[addr][0]}: {e}")
-            else:
-                print("No valid winner to announce.")
+        winner_name, _ = self.clients[winner_addr_tuple]
+
+        winner_message = f"{Colors.CYAN}\nGame over!\nCongratulations to the winner: {winner_name}"
+        for addr, (_, client_socket) in self.clients.items():
+            try:
+                client_socket.sendall(winner_message.encode('utf-8'))
+            except Exception as e:
+                print(f"{Colors.RED}Failed to announce winner to {self.clients[addr][0]}: {e}")
+
+    def game_over(self):
+        """Handles tasks after a game round ends."""
+        print(f"{Colors.CYAN}Game over, sending out offer requests...")
+        # Close all client connections
+        for addr, (_, client_socket) in self.clients.items():
+            client_socket.close()
+        self.clients.clear()  # Clear the list of clients for the next round
+        self.player_names_server.clear()
+        self.game_active = False
+        self.broadcasting = True  # Enable broadcasting for the next round
+        # Optionally, restart the UDP broadcast on a new thread if not automatically restarting
+        self.add_number = list(range(1, 501))
+        self.start()
 
     def start(self):
         """Starts the server."""
-        threading.Thread(target=self.start_udp_broadcast).start()
-        self.accept_tcp_connections()
+        threading.Thread(target=self.accept_tcp_connections, daemon=True).start()
+        self.start_udp_broadcast()
 
 
 # Starting the server
