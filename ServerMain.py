@@ -8,6 +8,7 @@ from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from Colors import Colors
 from GameStatistics import GameStatistics
+
 from TriviaQuestionManager import TriviaQuestionManager
 
 
@@ -22,9 +23,12 @@ class ServerMain:
         self.broadcasting = True  # Flag to control broadcasting state
         self.game_active = False  # Flag to check if a game is currently active
         self.player_names_server = []
+
         self.game_stats = GameStatistics()
+
         self.add_number = list(range(1, 501))  # Helper list for naming conflicts
         self.executor = ThreadPoolExecutor(max_workers=30)  # Executor for handling client threads
+
         self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
 
         self.game_stats = defaultdict(list)  # Tracks scores for each game
@@ -55,11 +59,14 @@ class ServerMain:
                     bound = True
                 except socket.error as e:
                     print(f"{Colors.YELLOW}Port {self.tcp_port} is in use or cannot be bound. Trying another port...")
+
                     self.tcp_port = random.randint(1024, 65535)
                     attempts += 1
 
             if not bound:
+
                 print(f"{Colors.RED}Failed to bind to a port after several attempts. Exiting.")
+
 
                 return
 
@@ -100,7 +107,9 @@ class ServerMain:
 
 
         except Exception as e:
+
             print(f"{Colors.RED}Failed to handle client {addr}: {e}")
+
 
     def check_name_unique(self, name):
         """Checks if the received name is unique among connected clients."""
@@ -110,17 +119,24 @@ class ServerMain:
 
     def manage_game_rounds(self):
         """Manages the game rounds, ensuring the game continues until there is only one winner."""
+
         active_players = self.clients.copy()
+
         round_number = 1
 
         while len(active_players) >= 1:
             question, correct_answer = self.trivia_manager.get_random_question()
+
             question = f'{Colors.BOLD}True or false: {question}\n'
+
             if round_number == 1:
                 message = f"\n{Colors.PASTEL_PEACH}Welcome to the Mystic server, where we are answering trivia questions about the Bible.\n"
                 for idx, player_name in enumerate(self.clients.values(), start=1):
+
                     message += f"Player {idx}: {player_name[0]}\n"
+
                 message += "==\n" + question + "\n"
+
             else:
                 players_names = list(active_players.values())
                 players_names = [name for name, _ in players_names]
@@ -151,7 +167,9 @@ class ServerMain:
                 try:
                     client_socket.sendall(no_winners_message.encode('utf-8'))
                 except Exception as e:
+
                     print(f"{Colors.RED}Failed to announce there are no winners to {self.clients[addr][0]}: {e}")
+
         self.game_over()
 
     def broadcast_question(self, active_players, message):
@@ -160,7 +178,9 @@ class ServerMain:
             try:
                 client_socket.sendall(message.encode('utf-8'))
             except Exception as e:
+
                 print(f"{Colors.RED}Error broadcasting question to player {player_name} at {addr}: {e}")
+
 
     def collect_answers(self, active_players):
         """Collects answers from each active player within a specified timeout."""
@@ -175,7 +195,9 @@ class ServerMain:
                 else:
                     answers[addr] = None
             except Exception as e:
+
                 print(f"{Colors.RED}Failed to receive answer from {player_name}:{e}")
+
 
         return answers
 
@@ -217,9 +239,12 @@ class ServerMain:
                 client_socket = self.clients[addr][1]
                 client_socket.sendall(broadcast_message.encode('utf-8'))
             except Exception as e:
+
                 print(f"{Colors.RED}Failed to send result message: {self.clients[addr][0]} {e}")
 
+
         self.game_stats[self.game_count].append(current_game_scores)
+
         return winners, active_players
 
     def announce_winner(self, winner_addr):
@@ -227,12 +252,15 @@ class ServerMain:
         winner_addr_tuple = list(winner_addr)[0]
         winner_name, _ = self.clients[winner_addr_tuple]
 
+
         winner_message = f"{Colors.PASTEL_BLUE}{Colors.BOLD}Game over!\nCongratulations to the winner: {winner_name}"
+
 
         for addr, (_, client_socket) in self.clients.items():
             try:
                 client_socket.sendall(winner_message.encode('utf-8'))
             except Exception as e:
+
                 print(f"{Colors.RED}Failed to announce winner to {self.clients[addr][0]}: {e}")
 
     def game_over(self):
@@ -241,6 +269,7 @@ class ServerMain:
         self.print_statistics()
 
         print(f"{Colors.BLUE}Game over, sending out offer requests...")
+
         # Close all client connections
         for addr, (_, client_socket) in self.clients.items():
             client_socket.close()

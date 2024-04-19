@@ -7,6 +7,7 @@ from inputimeout import inputimeout
 from Colors import Colors
 
 
+
 class ClientMain:
     def __init__(self):
         self.player_names = ["Aaron", "Abel", "Abraham", "Adam", "Amos", "Asher", "Barak", "Barnabas", "Bartholomew",
@@ -56,7 +57,9 @@ class ClientMain:
 
         udp_socket.bind(('', 13117))  # Assuming 13117 is the broadcast port
 
+
         print(f"{Colors.PASTEL_GREEN}Client started, listening for offer requests...")
+
         while True:
             data, addr = udp_socket.recvfrom(1024)
             magic_cookie, message_type = struct.unpack('!Ib', data[:5])
@@ -67,7 +70,9 @@ class ClientMain:
                 self.server_port = server_port
 
                 print(
+
                     f"Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
+
                 udp_socket.close()
                 break
 
@@ -79,6 +84,7 @@ class ClientMain:
             self.tcp_socket.sendall((self.name + '\n').encode())
         except Exception as e:
             print(f"{Colors.RED}Error communicating with server: {e}")
+
 
     def game_mode(self):
         """Enters game mode - sending answers and receiving questions."""
@@ -104,15 +110,18 @@ class ClientMain:
                                     pass
                                 else:
                                     print(f"{Colors.YELLOW}Invalid input. Please insert Y/1/T - for True || N/0/F - for False")
+
                             except Exception as e:
                                 answer = 'no answer'
                             finally:
                                 self.tcp_socket.sendall(answer.encode())
         except Exception as e:
+
             print(f"{Colors.RED}An error occurred: {e}")
 
         finally:
             print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
+
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
 
@@ -126,6 +135,7 @@ class ClientMain:
                 self.game_mode()
             except Exception as e:
                 print(f"{Colors.RED}Error encountered: {e}. Attempting to reconnect...")
+
                 if self.tcp_socket:
                     self.tcp_socket.close()  # Ensure the socket is closed before retrying
                 time.sleep(2)
