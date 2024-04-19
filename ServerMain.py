@@ -1,5 +1,6 @@
 import socket
 import threading
+from collections import defaultdict
 from threading import Timer
 import time
 import random
@@ -25,6 +26,9 @@ class ServerMain:
         self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load
         self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
 
+        self.game_stats = defaultdict(list)  # Tracks scores for each game
+        self.player_scores = defaultdict(int)  # Tracks overall scores for each player
+        self.game_count = 0
 
 
     def start_udp_broadcast(self):
@@ -111,12 +115,12 @@ class ServerMain:
 
         while len(active_players) >= 1:
             question, correct_answer = self.trivia_manager.get_random_question()
-            question =f'\n{Colors.BOLD}True or false: {question}\n\n'
+            question =f'{Colors.BOLD}True or false: {question}\n'
             if round_number == 1:
-                message = f"{Colors.PURPLE}Welcome to the Mystic server, where we are answering trivia questions about the Bible.\n"
+                message = f"\n{Colors.PASTEL_PEACH}Welcome to the Mystic server, where we are answering trivia questions about the Bible.\n"
                 for idx, player_name in enumerate(self.clients.values(), start=1):
-                    message += f"{Colors.UNDERLINE}Player {idx}: {player_name[0]}\n"
-                message += "=="+ question
+                    message += f"Player {idx}: {player_name[0]}\n"
+                message += "==\n"+ question +"\n"
             else:
                 players_names = list(active_players.values())
                 players_names = [name for name, _ in players_names]
@@ -144,7 +148,7 @@ class ServerMain:
         if active_players:
             self.announce_winner(active_players.keys())  # Announce to all clients
         else:
-            no_winners_message = f"\nGame over!\nNo winners"
+            no_winners_message = f"{Colors.BOLD}\nGame over!\nNo winners"
             for addr, (_, client_socket) in self.clients.items():
                 try:
                     client_socket.sendall(no_winners_message.encode('utf-8'))
@@ -183,16 +187,20 @@ class ServerMain:
         """Evaluates the collected answers and updates the list of active players, with specific output formatting."""
         winners = []
         result_messages = {}
+        current_game_scores = defaultdict(int)
 
         # First, compile the correctness of each answer
         for addr, answer in answers.items():
+            player_name = active_players[addr][0]
             if correct_answer == answer:
                 winners.append(addr)
-                result_messages[addr] = f"{active_players[addr][0]} is correct!"
+                current_game_scores[player_name] += 1  # Award point for correct answer
+                self.player_scores[player_name] += 1  # Update overall score
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is correct!"
             elif answer is None:
-                result_messages[addr] = f"{active_players[addr][0]} did not respond on time!"
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!"
             else:
-                result_messages[addr] = f"{active_players[addr][0]} is incorrect!"
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is incorrect!"
                 # Instead of deleting here, we will handle incorrect players later
 
         # Determine the winner(s) and append "Wins!" if there's a single winner
@@ -203,7 +211,7 @@ class ServerMain:
             result_messages[winner_addr] += f" {winner_name} Wins!"
 
         # Compile the broadcast message from individual messages
-        broadcast_message = "\n".join(result_messages.values())
+        broadcast_message = "\n".join(result_messages.values())+"\n"
 
         # Remove players who answered incorrectly from active_players for the next round
         for addr in list(
@@ -219,7 +227,7 @@ class ServerMain:
             except Exception as e:
                 print(f"{Colors.RED}Failed to send result message: {self.clients[addr][0]} {e}")
 
-
+        self.game_stats[self.game_count].append(current_game_scores)
         return winners, active_players
 
 
@@ -229,7 +237,8 @@ class ServerMain:
         """Announces the winner to all clients."""
         winner_name, _ = self.clients[winner_addr_tuple]
 
-        winner_message = f"{Colors.CYAN}\nGame over!\nCongratulations to the winner: {winner_name}"
+        winner_message = f"{Colors.PASTEL_BLUE}{Colors.BOLD}Game over!\nCongratulations to the winner: {winner_name}"
+
         for addr, (_, client_socket) in self.clients.items():
             try:
                 client_socket.sendall(winner_message.encode('utf-8'))
@@ -238,7 +247,10 @@ class ServerMain:
 
     def game_over(self):
         """Handles tasks after a game round ends."""
-        print(f"{Colors.CYAN}Game over, sending out offer requests...")
+        self.game_count += 1
+        self.print_statistics()  # Print statistics at the end of each game
+
+        print(f"{Colors.BLUE}Game over, sending out offer requests...")
         # Close all client connections
         for addr, (_, client_socket) in self.clients.items():
             client_socket.close()
@@ -249,6 +261,37 @@ class ServerMain:
         # Optionally, restart the UDP broadcast on a new thread if not automatically restarting
         self.add_number = list(range(1, 501))
         self.start()
+
+    def print_statistics(self):
+        print(f"{Colors.END}Game Statistics:")
+        print(f"Total games played: {self.game_count}")
+        # Find the best player ever
+        # Get the highest score or 0 if no scores are available or if all scores are less than 0
+        best_score = max(0, max(self.player_scores.values(), default=0))
+
+        # Now, find the player with this score
+        best_player = next((player for player, score in self.player_scores.items() if score == best_score), "No player")
+        print(f"Best player ever: {best_player} with score {self.player_scores[best_player]}")
+        # Average rounds per game
+        avg_rounds = int(sum(len(game) for game in self.game_stats.values()) / len(self.game_stats))
+        print(f"Average rounds per game: {avg_rounds}")
+        # Ranking of players by score in the latest game
+
+        if self.game_stats:
+            latest_game = self.game_stats[self.game_count - 1]  # This is a list of defaultdict(int)
+
+            # Aggregate scores across all rounds in the latest game
+            total_scores = defaultdict(int)
+            for round_scores in latest_game:
+                for player, score in round_scores.items():
+                    total_scores[player] += score
+
+            # Now sort the aggregated scores
+            sorted_players = sorted(total_scores.items(), key=lambda item: item[1], reverse=True)
+
+            print("Ranking players by correct answers:")
+            for rank, (player, score) in enumerate(sorted_players, 1):
+                print(f"{rank}. {player} - {score} correct answers")
 
     def start(self):
         """Starts the server."""
