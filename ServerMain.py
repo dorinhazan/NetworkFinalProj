@@ -7,8 +7,6 @@ import random
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from Colors import Colors
-from GameStatistics import GameStatistics
-
 from TriviaQuestionManager import TriviaQuestionManager
 
 class ServerMain:
@@ -22,7 +20,6 @@ class ServerMain:
         self.broadcasting = True  # New attribute to control broadcasting
         self.game_active = False
         self.player_names_server = []
-        self.game_stats = GameStatistics()
         self.add_number = list(range(1, 501))
         self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load
         self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
@@ -137,7 +134,7 @@ class ServerMain:
                     players_list = ', '.join(players_names[:-1]) + ' and ' + players_names[-1]
                 else:
                     players_list = players_names[0]
-                message = f"\n\nRound {round_number}, played by {players_list}:\n{question}"
+                message = f"{Colors.PASTEL_PEACH}{Colors.UNDERLINE}Round {round_number}, played by {players_list}:\n{Colors.END}{Colors.PASTEL_PEACH}{question}"
 
             self.broadcast_question(active_players, message)
 
@@ -213,7 +210,7 @@ class ServerMain:
                 result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is correct!"
             elif answer is None:
                 no_correct_answers.append(addr)
-                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!{Colors.RESET}"
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!{Colors.END}"
             else:
                 no_correct_answers.append(addr)
                 result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is incorrect!"
