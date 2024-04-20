@@ -9,7 +9,6 @@ This project implements a trivia game system, consisting of a server that manage
 - **ClientMain.py**: Client that listens for game invitations and connects to the server to participate in the game.
 - **BotClient.py**: Automated client designed for testing, which simulates real player actions.
 - **TriviaQuestionManager.py**: Manages trivia questions and answers.
-- **GameStatistics.py**: Tracks and reports game statistics.
 - **Colors.py**: Utility for colored console output to enhance readability.
 
 ## Features
