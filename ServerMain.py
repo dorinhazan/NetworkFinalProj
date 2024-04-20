@@ -340,25 +340,6 @@ class ServerMain:
         self.executor.shutdown(wait=True)
         print(f"{Colors.BLUE}Server has been shutdown cleanly.{Colors.END}")
 
-    # def shutdown_server(self):
-    #     """Shuts down the server and closes all active connections."""
-    #     self.broadcasting = False  # Stop broadcasting
-    #     self.game_active = False  # Stop the game
-    #
-    #     # Close all client sockets
-    #     for _, (player_name, client_socket) in self.clients.items():
-    #         print(f"Closing connection for {player_name}")
-    #         client_socket.close()
-    #
-    #     # Clear the clients dictionary
-    #     self.clients.clear()
-    #     # Shutdown the thread pool executor
-    #     self.executor.shutdown(wait=True)
-    #     if self.tcp_socket_server:
-    #         self.tcp_socket_server.close()
-    #     print(f"{Colors.BLUE}Server has been shutdown cleanly.{Colors.END}")
-
-
 
 # Starting the server
 if __name__ == "__main__":
