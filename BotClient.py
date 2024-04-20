@@ -5,7 +5,6 @@ from ClientMain import ClientMain
 from Colors import Colors
 
 
-
 class BotClient(ClientMain):
     """
     BotClient extends ClientMain to interact with a game server automatically.
@@ -28,21 +27,30 @@ class BotClient(ClientMain):
             while not game_over_received:
                 # Block until there are sockets ready for reading
 
+
                 readable, _, _ = select.select([self.tcp_socket], [], [], None)
                 if self.tcp_socket in readable:
                     # self.send_heartbeat()
                     try:
                         message = self.tcp_socket.recv(1024).decode().strip()
                         if message != '':
+
                             print(f"\n{message}") # Print the message from the server
                             if "Game over!" in message:
                                 game_over_received = True # End the loop if game over message is received
+
+                            print(f"\n{message}")
+                            if "Game over!" in message:
+                                game_over_received = True
+
                                 break
                             if "True or false" in message:
                                 # Start a timer for 10 seconds to wait for an answer
                                 start_time = time.time()
                                 while (time.time() - start_time) < 10:
+
                                     # Simulate a delay in response to make bot's behavior more realistic
+
                                     time.sleep(5)
                                     answer = random.choice(['Y', '1', 'T', 'N', '0', 'F'])
                                     # self.send_heartbeat()
@@ -56,11 +64,11 @@ class BotClient(ClientMain):
                     except Exception as e:
                         print(f"{Colors.RED}KeyBoardInterapt {Colors.END}")
 
+
         except Exception as e:
             print(f"{Colors.RED}[Bot {self.name}] An error occurred: {e}{Colors.END}")
 
         finally:
-            # Close the connection and prepare for a possible new game or connection
             print(f"{Colors.END}Server disconnected, listening for offer requests...\n")
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
@@ -84,7 +92,6 @@ class BotClient(ClientMain):
 
                 if self.tcp_socket:
                     self.tcp_socket.close()  # Ensure the socket is closed before retrying
-
 
 
 if __name__ == "__main__":
