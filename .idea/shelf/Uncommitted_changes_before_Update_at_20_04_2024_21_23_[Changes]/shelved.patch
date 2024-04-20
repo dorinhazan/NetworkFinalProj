@@ -1,0 +1,669 @@
+Index: .idea/shelf/Uncommitted_changes_before_Update_at_20_04_2024_21_02_[Changes]/shelved.patch
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/shelf/Uncommitted_changes_before_Update_at_20_04_2024_21_02_[Changes]/shelved.patch b/.idea/shelf/Uncommitted_changes_before_Update_at_20_04_2024_21_02_[Changes]/shelved.patch
+new file mode 100644
+--- /dev/null	(date 1713636172653)
++++ b/.idea/shelf/Uncommitted_changes_before_Update_at_20_04_2024_21_02_[Changes]/shelved.patch	(date 1713636172653)
+@@ -0,0 +1,383 @@
++Index: ServerMain.py
++IDEA additional info:
++Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
++<+>import socket\r\nimport threading\r\nfrom collections import defaultdict\r\nfrom threading import Timer\r\nimport time\r\nimport random\r\nfrom struct import pack\r\nfrom concurrent.futures import ThreadPoolExecutor\r\nfrom Colors import Colors\r\nfrom GameStatistics import GameStatistics\r\n\r\nfrom TriviaQuestionManager import TriviaQuestionManager\r\n\r\nclass ServerMain:\r\n    def __init__(self, port=13117):\r\n        self.udp_broadcast_port = port\r\n        self.clients = {}  # Stores client address and name\r\n        self.trivia_manager = TriviaQuestionManager()\r\n        self.tcp_port = random.randint(1024, 65535)\r\n        base_server_name = \"Team Mystic\"\r\n        self.server_name = base_server_name.ljust(32)\r\n        self.broadcasting = True  # New attribute to control broadcasting\r\n        self.game_active = False\r\n        self.player_names_server = []\r\n\r\n        self.game_stats = GameStatistics()\r\n\r\n        self.add_number = list(range(1, 501))\r\n        self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load\r\n        self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access\r\n\r\n        self.game_stats = defaultdict(list)  # Tracks scores for each game\r\n        self.player_scores = defaultdict(int)  # Tracks overall scores for each player\r\n        self.game_count = 0\r\n\r\n\r\n    def start_udp_broadcast(self):\r\n        \"\"\"Modified to continuously broadcast using the current TCP port.\"\"\"\r\n        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as udp_socket:\r\n            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)\r\n\r\n            while self.broadcasting:\r\n                # Repack the message with the current TCP port\r\n                message = pack('!Ib32sH', 0xabcddcba, 0x2, self.server_name.encode('utf-8'), self.tcp_port)\r\n                udp_socket.sendto(message, ('<broadcast>', self.udp_broadcast_port))\r\n                time.sleep(2)\r\n    def accept_tcp_connections(self):\r\n        \"\"\"Accepts TCP connections from clients using a ThreadPoolExecutor.\"\"\"\r\n        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_socket:\r\n            bound = False\r\n            attempts = 0\r\n            while not bound and attempts < 50:\r\n                try:\r\n                    tcp_socket.bind(('', self.tcp_port))\r\n                    tcp_socket.listen()\r\n                    print(f\"{Colors.GREEN}Server started, listening on IP address {socket.gethostbyname(socket.gethostname())}\")\r\n                    bound = True\r\n                except socket.error as e:\r\n                    print(f\"{Colors.YELLOW}Port {self.tcp_port} is in use or cannot be bound. Trying another port...\")\r\n\r\n                    self.tcp_port = random.randint(1024, 65535)\r\n                    attempts += 1\r\n\r\n            if not bound:\r\n\r\n                print(f\"{Colors.RED}Failed to bind to a port after several attempts. Exiting.\")\r\n\r\n\r\n                return\r\n\r\n            self.wait_for_first_connection(tcp_socket)\r\n\r\n    def wait_for_first_connection(self, tcp_socket):\r\n        \"\"\"Waits for the first connection and starts a timer for accepting more connections.\"\"\"\r\n        first_client_connected = False\r\n\r\n        def stop_accepting_new_connections():\r\n            self.game_active = True\r\n            self.manage_game_rounds()\r\n\r\n        while not self.game_active:\r\n            tcp_socket.settimeout(1)  # Short timeout to periodically check if game has started\r\n            try:\r\n                client_socket, addr = tcp_socket.accept()\r\n                self.executor.submit(self.handle_client, client_socket, addr)\r\n                if not first_client_connected:\r\n                    first_client_connected = True\r\n                    Timer(10.0, stop_accepting_new_connections).start()\r\n            except socket.timeout:\r\n                continue\r\n\r\n    def handle_client(self, client_socket, addr):\r\n        \"\"\"Handles communication with a connected client.\"\"\"\r\n        try:\r\n            player_name = client_socket.recv(1024).decode().strip()\r\n            with self.player_names_server_lock:  # Use the lock when accessing the shared resource\r\n                if not self.check_name_unique(player_name):\r\n                    player_name = player_name + str(self.add_number[0])\r\n                    self.add_number = self.add_number[1:]\r\n                    self.clients[addr] = (player_name, client_socket)\r\n                    self.player_names_server.append(player_name)\r\n                self.clients[addr] = (player_name, client_socket)\r\n                self.player_names_server.append(player_name)\r\n\r\n\r\n        except Exception as e:\r\n\r\n            print(f\"{Colors.RED}Failed to handle client {addr}: {e}\")\r\n\r\n\r\n\r\n    def check_name_unique(self, name):\r\n        \"\"\"Checks if the received name is unique.\"\"\"\r\n        if name not in self.player_names_server:\r\n            return True\r\n        return False\r\n\r\n\r\n    def manage_game_rounds(self):\r\n        \"\"\"Manages the game rounds, ensuring the game continues until there is only one winner.\"\"\"\r\n        active_players = self.clients.copy()  # Copy the current clients as active players for this round\r\n\r\n        round_number = 1\r\n\r\n        while len(active_players) >= 1:\r\n            question, correct_answer = self.trivia_manager.get_random_question()\r\n            question =f'{Colors.BOLD}True or false: {question}\\n'\r\n\r\n            if round_number == 1:\r\n                message = f\"\\n{Colors.PASTEL_PEACH}Welcome to the Mystic server, where we are answering trivia questions about the Bible.\\n\"\r\n                for idx, player_name in enumerate(self.clients.values(), start=1):\r\n\r\n                    message += f\"Player {idx}: {player_name[0]}\\n\"\r\n                message += \"==\\n\"+ question +\"\\n\"\r\n\r\n            else:\r\n                players_names = list(active_players.values())\r\n                players_names = [name for name, _ in players_names]\r\n                if len(players_names) > 1:\r\n                    players_list = ', '.join(players_names[:-1]) + ' and ' + players_names[-1]\r\n                else:\r\n                    players_list = players_names[0]\r\n                message = f\"\\n\\nRound {round_number}, played by {players_list}:\\n{question}\"\r\n\r\n            self.broadcast_question(active_players, message)\r\n\r\n            # Collect and evaluate answers within a timeout (10 seconds)\r\n            answers = self.collect_answers(active_players)\r\n            winners, active_players = self.evaluate_answers(answers, active_players, correct_answer)\r\n\r\n            if len(active_players) == 1 and len(winners) == 0:\r\n                round_number += 1\r\n            elif len(active_players) > 1 and len(winners)>1:\r\n                round_number += 1\r\n            elif len(active_players)==2  and len(winners)==1:\r\n                round_number += 1\r\n            else:\r\n                break  # Exit loop if one player is left\r\n\r\n        if active_players:\r\n            self.announce_winner(active_players.keys())  # Announce to all clients\r\n        else:\r\n            no_winners_message = f\"{Colors.BOLD}\\nGame over!\\nNo winners\"\r\n            for addr, (_, client_socket) in self.clients.items():\r\n                try:\r\n                    client_socket.sendall(no_winners_message.encode('utf-8'))\r\n                except Exception as e:\r\n\r\n                    print(f\"{Colors.RED}Failed to announce there are no winners to {self.clients[addr][0]}: {e}\")\r\n\r\n        self.game_over()\r\n\r\n    def broadcast_question(self, active_players, message):\r\n        \"\"\"Sends the trivia question to all active players.\"\"\"\r\n        for addr, (player_name, client_socket) in active_players.items():\r\n            try:\r\n                client_socket.sendall(message.encode('utf-8'))\r\n            except Exception as e:\r\n\r\n                print(f\"{Colors.RED}Error broadcasting question to player {player_name} at {addr}: {e}\")\r\n\r\n\r\n\r\n\r\n    def collect_answers(self, active_players):\r\n        \"\"\"Collects answers from each active player within a specified timeout.\"\"\"\r\n        answers = {}\r\n        for addr, (player_name, client_socket) in active_players.items():\r\n            try:\r\n                data = client_socket.recv(1024).decode('utf-8').strip().upper()\r\n                if data in ['Y', 'T', '1']:  # Interpreted as True\r\n                    answers[addr] = True\r\n                elif data in ['N', 'F', '0']:  # Interpreted as False\r\n                    answers[addr] = False\r\n                else:\r\n                    answers[addr] = None\r\n            except Exception as e:\r\n\r\n                print(f\"{Colors.RED}Failed to receive answer from {player_name}:{e}\")\r\n\r\n\r\n        return answers\r\n\r\n    def evaluate_answers(self, answers, active_players, correct_answer):\r\n        \"\"\"Evaluates the collected answers and updates the list of active players, with specific output formatting.\"\"\"\r\n        winners = []\r\n        result_messages = {}\r\n        current_game_scores = defaultdict(int)\r\n\r\n        # First, compile the correctness of each answer\r\n        for addr, answer in answers.items():\r\n            player_name = active_players[addr][0]\r\n            if correct_answer == answer:\r\n                winners.append(addr)\r\n                current_game_scores[player_name] += 1  # Award point for correct answer\r\n                self.player_scores[player_name] += 1  # Update overall score\r\n                result_messages[addr] = f\"{Colors.PASTEL_ORANGE}{player_name} is correct!\"\r\n            elif answer is None:\r\n                result_messages[addr] = f\"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!\"\r\n            else:\r\n                result_messages[addr] = f\"{Colors.PASTEL_ORANGE}{player_name} is incorrect!\"\r\n                # Instead of deleting here, we will handle incorrect players later\r\n\r\n        # Determine the winner(s) and append \"Wins!\" if there's a single winner\r\n        if len(winners) == 1:\r\n            winner_addr = winners[0]\r\n            winner_name = active_players[winner_addr][0]\r\n            # Add a winning note to the winner's message\r\n            result_messages[winner_addr] += f\" {winner_name} Wins!\"\r\n\r\n        # Compile the broadcast message from individual messages\r\n        broadcast_message = \"\\n\".join(result_messages.values())+\"\\n\"\r\n\r\n        # Remove players who answered incorrectly from active_players for the next round\r\n        for addr in list(\r\n                active_players.keys()):  # Convert to list to avoid 'dictionary changed size during iteration' error\r\n            if addr not in winners:\r\n                del active_players[addr]\r\n\r\n        # Broadcast the message to all remaining players\r\n        for addr in self.clients.keys():\r\n            try:\r\n                client_socket = self.clients[addr][1]\r\n                client_socket.sendall(broadcast_message.encode('utf-8'))\r\n            except Exception as e:\r\n\r\n                print(f\"{Colors.RED}Failed to send result message: {self.clients[addr][0]} {e}\")\r\n\r\n\r\n        self.game_stats[self.game_count].append(current_game_scores)\r\n\r\n        return winners, active_players\r\n\r\n\r\n\r\n    def announce_winner(self, winner_addr):\r\n        winner_addr_tuple = list(winner_addr)[0]\r\n        \"\"\"Announces the winner to all clients.\"\"\"\r\n        winner_name, _ = self.clients[winner_addr_tuple]\r\n\r\n\r\n        winner_message = f\"{Colors.PASTEL_BLUE}{Colors.BOLD}Game over!\\nCongratulations to the winner: {winner_name}\"\r\n\r\n\r\n        for addr, (_, client_socket) in self.clients.items():\r\n            try:\r\n                client_socket.sendall(winner_message.encode('utf-8'))\r\n            except Exception as e:\r\n\r\n                print(f\"{Colors.RED}Failed to announce winner to {self.clients[addr][0]}: {e}\")\r\n\r\n    def game_over(self):\r\n        \"\"\"Handles tasks after a game round ends.\"\"\"\r\n        self.game_count += 1\r\n        self.print_statistics()  # Print statistics at the end of each game\r\n\r\n        print(f\"{Colors.BLUE}Game over, sending out offer requests...\")\r\n\r\n        # Close all client connections\r\n        for addr, (_, client_socket) in self.clients.items():\r\n            client_socket.close()\r\n        self.clients.clear()  # Clear the list of clients for the next round\r\n        self.player_names_server.clear()\r\n        self.game_active = False\r\n        self.broadcasting = True  # Enable broadcasting for the next round\r\n        # Optionally, restart the UDP broadcast on a new thread if not automatically restarting\r\n        self.add_number = list(range(1, 501))\r\n        self.start()\r\n\r\n    def print_statistics(self):\r\n        print(f\"{Colors.END}Game Statistics:\")\r\n        print(f\"Total games played: {self.game_count}\")\r\n        # Find the best player ever\r\n        # Get the highest score or 0 if no scores are available or if all scores are less than 0\r\n        best_score = max(0, max(self.player_scores.values(), default=0))\r\n\r\n        # Now, find the player with this score\r\n        best_player = next((player for player, score in self.player_scores.items() if score == best_score), \"No player\")\r\n        print(f\"Best player ever: {best_player} with score {self.player_scores[best_player]}\")\r\n        # Average rounds per game\r\n        avg_rounds = int(sum(len(game) for game in self.game_stats.values()) / len(self.game_stats))\r\n        print(f\"Average rounds per game: {avg_rounds}\")\r\n        # Ranking of players by score in the latest game\r\n\r\n        if self.game_stats:\r\n            latest_game = self.game_stats[self.game_count - 1]  # This is a list of defaultdict(int)\r\n\r\n            # Aggregate scores across all rounds in the latest game\r\n            total_scores = defaultdict(int)\r\n            for round_scores in latest_game:\r\n                for player, score in round_scores.items():\r\n                    total_scores[player] += score\r\n\r\n            # Now sort the aggregated scores\r\n            sorted_players = sorted(total_scores.items(), key=lambda item: item[1], reverse=True)\r\n\r\n            print(\"Ranking players by correct answers:\")\r\n            for rank, (player, score) in enumerate(sorted_players, 1):\r\n                print(f\"{rank}. {player} - {score} correct answers\")\r\n\r\n    def start(self):\r\n        \"\"\"Starts the server.\"\"\"\r\n        threading.Thread(target=self.accept_tcp_connections, daemon=True).start()\r\n        self.start_udp_broadcast()\r\n\r\n\r\n# Starting the server\r\nif __name__ == \"__main__\":\r\n    server = ServerMain()\r\n    server.start()
++Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
++<+>UTF-8
++===================================================================
++diff --git a/ServerMain.py b/ServerMain.py
++--- a/ServerMain.py	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ b/ServerMain.py	(date 1713629530779)
++@@ -7,7 +7,6 @@
++ from struct import pack
++ from concurrent.futures import ThreadPoolExecutor
++ from Colors import Colors
++-from GameStatistics import GameStatistics
++ 
++ from TriviaQuestionManager import TriviaQuestionManager
++ 
++@@ -22,13 +21,9 @@
++         self.broadcasting = True  # New attribute to control broadcasting
++         self.game_active = False
++         self.player_names_server = []
++-
++-        self.game_stats = GameStatistics()
++-
++         self.add_number = list(range(1, 501))
++         self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load
++         self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
++-
++         self.game_stats = defaultdict(list)  # Tracks scores for each game
++         self.player_scores = defaultdict(int)  # Tracks overall scores for each player
++         self.game_count = 0
++@@ -86,6 +81,7 @@
++                 if not first_client_connected:
++                     first_client_connected = True
++                     Timer(10.0, stop_accepting_new_connections).start()
+++
++             except socket.timeout:
++                 continue
++ 
++@@ -102,13 +98,9 @@
++                 self.clients[addr] = (player_name, client_socket)
++                 self.player_names_server.append(player_name)
++ 
++-
++         except Exception as e:
++-
++             print(f"{Colors.RED}Failed to handle client {addr}: {e}")
++ 
++-
++-
++     def check_name_unique(self, name):
++         """Checks if the received name is unique."""
++         if name not in self.player_names_server:
++@@ -119,7 +111,6 @@
++     def manage_game_rounds(self):
++         """Manages the game rounds, ensuring the game continues until there is only one winner."""
++         active_players = self.clients.copy()  # Copy the current clients as active players for this round
++-
++         round_number = 1
++ 
++         while len(active_players) >= 1:
++@@ -132,7 +123,6 @@
++ 
++                     message += f"Player {idx}: {player_name[0]}\n"
++                 message += "==\n"+ question +"\n"
++-
++             else:
++                 players_names = list(active_players.values())
++                 players_names = [name for name, _ in players_names]
++@@ -150,10 +140,10 @@
++ 
++             if len(active_players) == 1 and len(winners) == 0:
++                 round_number += 1
++-            elif len(active_players) > 1 and len(winners)>1:
+++            elif len(active_players) > 1 and len(winners) != 1:
++                 round_number += 1
++-            elif len(active_players)==2  and len(winners)==1:
++-                round_number += 1
+++            # elif len(active_players)==2  and len(winners)==1:
+++            #     round_number += 1
++             else:
++                 break  # Exit loop if one player is left
++ 
++@@ -165,7 +155,6 @@
++                 try:
++                     client_socket.sendall(no_winners_message.encode('utf-8'))
++                 except Exception as e:
++-
++                     print(f"{Colors.RED}Failed to announce there are no winners to {self.clients[addr][0]}: {e}")
++ 
++         self.game_over()
++@@ -179,9 +168,6 @@
++ 
++                 print(f"{Colors.RED}Error broadcasting question to player {player_name} at {addr}: {e}")
++ 
++-
++-
++-
++     def collect_answers(self, active_players):
++         """Collects answers from each active player within a specified timeout."""
++         answers = {}
++@@ -204,6 +190,7 @@
++     def evaluate_answers(self, answers, active_players, correct_answer):
++         """Evaluates the collected answers and updates the list of active players, with specific output formatting."""
++         winners = []
+++        no_correct_answers = []
++         result_messages = {}
++         current_game_scores = defaultdict(int)
++ 
++@@ -216,12 +203,12 @@
++                 self.player_scores[player_name] += 1  # Update overall score
++                 result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is correct!"
++             elif answer is None:
++-                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!"
+++                no_correct_answers.append(addr)
+++                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!{Colors.RESET}"
++             else:
+++                no_correct_answers.append(addr)
++                 result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is incorrect!"
++-                # Instead of deleting here, we will handle incorrect players later
++ 
++-        # Determine the winner(s) and append "Wins!" if there's a single winner
++         if len(winners) == 1:
++             winner_addr = winners[0]
++             winner_name = active_players[winner_addr][0]
++@@ -231,11 +218,11 @@
++         # Compile the broadcast message from individual messages
++         broadcast_message = "\n".join(result_messages.values())+"\n"
++ 
++-        # Remove players who answered incorrectly from active_players for the next round
++-        for addr in list(
++-                active_players.keys()):  # Convert to list to avoid 'dictionary changed size during iteration' error
++-            if addr not in winners:
++-                del active_players[addr]
+++        if len(no_correct_answers) != len(active_players):
+++            # Remove players who answered incorrectly from active_players for the next round
+++            for addr in list(active_players.keys()):  # Convert to list to avoid 'dictionary changed size during iteration' error
+++                if addr not in winners:
+++                    del active_players[addr]
++ 
++         # Broadcast the message to all remaining players
++         for addr in self.clients.keys():
++@@ -243,37 +230,27 @@
++                 client_socket = self.clients[addr][1]
++                 client_socket.sendall(broadcast_message.encode('utf-8'))
++             except Exception as e:
++-
++                 print(f"{Colors.RED}Failed to send result message: {self.clients[addr][0]} {e}")
++-
++-
++         self.game_stats[self.game_count].append(current_game_scores)
++-
++         return winners, active_players
++ 
++ 
++-
++     def announce_winner(self, winner_addr):
++         winner_addr_tuple = list(winner_addr)[0]
++         """Announces the winner to all clients."""
++         winner_name, _ = self.clients[winner_addr_tuple]
++-
++-
++         winner_message = f"{Colors.PASTEL_BLUE}{Colors.BOLD}Game over!\nCongratulations to the winner: {winner_name}"
++-
++-
++         for addr, (_, client_socket) in self.clients.items():
++             try:
++                 client_socket.sendall(winner_message.encode('utf-8'))
+++
++             except Exception as e:
++-
++                 print(f"{Colors.RED}Failed to announce winner to {self.clients[addr][0]}: {e}")
++ 
++     def game_over(self):
++         """Handles tasks after a game round ends."""
++         self.game_count += 1
++         self.print_statistics()  # Print statistics at the end of each game
++-
++         print(f"{Colors.BLUE}Game over, sending out offer requests...")
++ 
++         # Close all client connections
++Index: testbot.py
++IDEA additional info:
++Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
++<+>import threading\r\nfrom BotClient import BotClient  # Make sure this import points to your BotClient class\r\n\r\nclass BotClientManager:\r\n    def __init__(self, num_bots):\r\n        self.num_bots = num_bots\r\n        self.bots = []\r\n\r\n    def create_bots(self):\r\n        for _ in range(self.num_bots):\r\n            bot = BotClient()  # Instantiate a BotClient\r\n            self.bots.append(bot)\r\n\r\n    def start_bots(self):\r\n        threads = []\r\n        for bot in self.bots:\r\n            thread = threading.Thread(target=bot.run)\r\n            threads.append(thread)\r\n            thread.start()\r\n\r\n        for thread in threads:\r\n            thread.join()\r\n\r\n    def run(self):\r\n        self.create_bots()\r\n        self.start_bots()\r\n\r\n# Example usage\r\nif __name__ == \"__main__\":\r\n    num_bots = 5  # Define the number of bot clients you want to create\r\n    bot_manager = BotClientManager(num_bots)\r\n    bot_manager.run()\r\n
++Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
++<+>UTF-8
++===================================================================
++diff --git a/testbot.py b/testbot.py
++--- a/testbot.py	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ b/testbot.py	(date 1713622899614)
++@@ -27,6 +27,6 @@
++ 
++ # Example usage
++ if __name__ == "__main__":
++-    num_bots = 5  # Define the number of bot clients you want to create
+++    num_bots = 3  # Define the number of bot clients you want to create
++     bot_manager = BotClientManager(num_bots)
++     bot_manager.run()
++Index: Colors.py
++IDEA additional info:
++Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
++<+>class Colors:\r\n    HEADER = '\\033[95m'\r\n    BLUE = '\\033[94m'\r\n    CYAN = '\\033[96m'\r\n    GREEN = '\\033[92m'\r\n    PASTEL_GREEN = '\\033[38;2;119;221;119m'\r\n\r\n    YELLOW = '\\033[93m'\r\n    RED = '\\033[91m'\r\n    PURPLE = '\\033[0;35m'\r\n    END = '\\033[0m'\r\n    BOLD = '\\033[1m'\r\n    UNDERLINE = '\\033[4m'\r\n    PASTEL_PEACH = '\\033[38;2;255;229;180m'\r\n    PASTEL_BLUE = '\\033[38;2;179;205;224m'\r\n    PASTEL_ORANGE = '\\033[38;2;255;179;71m'\r\n
++Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
++<+>UTF-8
++===================================================================
++diff --git a/Colors.py b/Colors.py
++--- a/Colors.py	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ b/Colors.py	(date 1713597708997)
++@@ -4,7 +4,7 @@
++     CYAN = '\033[96m'
++     GREEN = '\033[92m'
++     PASTEL_GREEN = '\033[38;2;119;221;119m'
++-
+++    RESET = "\033[0m"
++     YELLOW = '\033[93m'
++     RED = '\033[91m'
++     PURPLE = '\033[0;35m'
++Index: GameStatistics.py
++===================================================================
++diff --git a/GameStatistics.py b/GameStatistics.py
++deleted file mode 100644
++--- a/GameStatistics.py	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ /dev/null	(revision 50bded60ad55b7398471496112d6385d680f88f6)
++@@ -1,67 +0,0 @@
++-class GameStatistics:
++-    def _init_(self):
++-        self.best_team_ever = None
++-        self.best_score_ever = 0
++-        self.character_frequency = {}
++-        self.total_games_played = 0
++-        self.total_answers_received = 0
++-
++-    def update_statistics(self, game_data):
++-        """
++-        Update statistics based on the results of a single game.
++-        :param game_data: dict with keys 'team_scores' and 'answers'
++-        """
++-        self.total_games_played += 1
++-        self.update_best_team_ever(game_data['team_scores'])
++-        self.update_character_frequency(game_data['answers'])
++-
++-    def update_best_team_ever(self, team_scores):
++-        """
++-        Determines if the current game has the best team score ever and updates.
++-        :param team_scores: dict of team names and their scores
++-        """
++-        for team, score in team_scores.items():
++-            if score > self.best_score_ever:
++-                self.best_score_ever = score
++-                self.best_team_ever = team
++-
++-    def update_character_frequency(self, answers):
++-        """
++-        Updates the frequency of each character typed by players.
++-        :param answers: list of strings (answers) from players
++-        """
++-        for answer in answers:
++-            for char in answer:
++-                if char in self.character_frequency:
++-                    self.character_frequency[char] += 1
++-                else:
++-                    self.character_frequency[char] = 1
++-        self.total_answers_received += len(answers)
++-
++-    def get_most_common_character(self):
++-        """
++-        Returns the most commonly typed character.
++-        """
++-        if not self.character_frequency:
++-            return None
++-        return max(self.character_frequency, key=self.character_frequency.get)
++-
++-    def display_statistics(self):
++-        """
++-        Prints the collected statistics.
++-        """
++-        print(f"Total games played: {self.total_games_played}")
++-        print(f"Best team ever: {self.best_team_ever} with a score of {self.best_score_ever}")
++-        most_common_char = self.get_most_common_character()
++-        print(f"Most commonly typed character: {most_common_char} (used {self.character_frequency.get(most_common_char, 0)} times)")
++-        print(f"Total answers received: {self.total_answers_received}")
++-
++-# Example usage within the server
++-if __name__ == "_main_":
++-    stats = GameStatistics()
++-    example_game_data = {
++-        'team_scores': {'Team Mystic': 100, 'Team Valor': 95},
++-        'answers': ['yes', 'no', 'yes', 'True', 'False']
++-    }
++-    stats.update_statistics(example_game_data)
++-    stats.display_statistics()
++Index: test.py
++===================================================================
++diff --git a/test.py b/test.py
++deleted file mode 100644
++--- a/test.py	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ /dev/null	(revision 50bded60ad55b7398471496112d6385d680f88f6)
++@@ -1,44 +0,0 @@
++-from ClientMain import ClientMain
++-import threading
++-import random
++-
++-class AutomatedClient(ClientMain):
++-    def __init__(self, name):
++-        super().__init__(name)
++-        # Automatically set the client's name during initialization
++-
++-    def run(self):
++-        """Overrides the run method to automatically connect to the server and enter the game mode."""
++-        self.connect_to_server()
++-        self.game_mode()
++-
++-    def connect_to_server(self):
++-        """Connect to the server automatically, omitting the input step."""
++-        # Assuming connect_to_server() in ClientMain connects to the server
++-        super().connect_to_server()
++-        print(f"{self.name} connected to the server.")
++-
++-    def game_mode(self):
++-        """Simulate game interaction by automatically sending answers."""
++-        # In ClientMain, replace or complement the logic for waiting for a question and sending a response
++-        # For simulation, we'll just print an automatic response
++-        automatic_answer = random.choice(['Y', 'N'])  # Randomly chooses 'Y' or 'N'
++-        print(f"{self.name} automatically answering: {automatic_answer}")
++-        # Here, you should actually send the answer to the server if in a real scenario
++-
++-def create_and_run_client(client_id):
++-    client_name = f"Player_{client_id}"
++-    client = AutomatedClient(client_name)
++-    client.run()
++-
++-if __name__ == "__main__":
++-    number_of_clients = 5  # For example, creating 5 clients
++-    threads = []
++-
++-    for i in range(number_of_clients):
++-        thread = threading.Thread(target=create_and_run_client, args=(i+1,))
++-        threads.append(thread)
++-        thread.start()
++-
++-    for thread in threads:
++-        thread.join()
++\ No newline at end of file
++Index: .idea/finalProjectNetwork.iml
++IDEA additional info:
++Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
++<+><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<module type=\"PYTHON_MODULE\" version=\"4\">\r\n  <component name=\"NewModuleRootManager\">\r\n    <content url=\"file://$MODULE_DIR$\">\r\n      <excludeFolder url=\"file://$MODULE_DIR$/venv\" />\r\n    </content>\r\n    <orderEntry type=\"inheritedJdk\" />\r\n    <orderEntry type=\"sourceFolder\" forTests=\"false\" />\r\n  </component>\r\n</module>
++Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
++<+>UTF-8
++===================================================================
++diff --git a/.idea/finalProjectNetwork.iml b/.idea/finalProjectNetwork.iml
++--- a/.idea/finalProjectNetwork.iml	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ b/.idea/finalProjectNetwork.iml	(date 1713597904141)
++@@ -4,7 +4,7 @@
++     <content url="file://$MODULE_DIR$">
++       <excludeFolder url="file://$MODULE_DIR$/venv" />
++     </content>
++-    <orderEntry type="inheritedJdk" />
+++    <orderEntry type="jdk" jdkName="Python 3.9" jdkType="Python SDK" />
++     <orderEntry type="sourceFolder" forTests="false" />
++   </component>
++ </module>
++\ No newline at end of file
++Index: .idea/misc.xml
++IDEA additional info:
++Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
++<+><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<project version=\"4\">\r\n  <component name=\"Black\">\r\n    <option name=\"sdkName\" value=\"Python 3.11 (finalProjectNetwork)\" />\r\n  </component>\r\n  <component name=\"ProjectRootManager\" version=\"2\" project-jdk-name=\"Python 3.11 (finalProjectNetwork)\" project-jdk-type=\"Python SDK\" />\r\n</project>
++Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
++<+>UTF-8
++===================================================================
++diff --git a/.idea/misc.xml b/.idea/misc.xml
++--- a/.idea/misc.xml	(revision 50bded60ad55b7398471496112d6385d680f88f6)
+++++ b/.idea/misc.xml	(date 1713597904158)
++@@ -3,5 +3,5 @@
++   <component name="Black">
++     <option name="sdkName" value="Python 3.11 (finalProjectNetwork)" />
++   </component>
++-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.11 (finalProjectNetwork)" project-jdk-type="Python SDK" />
+++  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.9" project-jdk-type="Python SDK" />
++ </project>
++\ No newline at end of file
+Index: .idea/workspace.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/workspace.xml b/.idea/workspace.xml
+new file mode 100644
+--- /dev/null	(date 1713637379168)
++++ b/.idea/workspace.xml	(date 1713637379168)
+@@ -0,0 +1,265 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="AutoImportSettings">
++    <option name="autoReloadType" value="SELECTIVE" />
++  </component>
++  <component name="ChangeListManager">
++    <list default="true" id="935d8257-b942-4bca-b4d3-c3f2d36c0c1b" name="Changes" comment="updated == final ClientMain and BotClient">
++      <change afterPath="$PROJECT_DIR$/.idea/shelf/Uncommitted_changes_before_Update_at_20_04_2024_21_02_[Changes]/shelved.patch" afterDir="false" />
++      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
++      <change beforePath="$PROJECT_DIR$/BotClient.py" beforeDir="false" afterPath="$PROJECT_DIR$/BotClient.py" afterDir="false" />
++      <change beforePath="$PROJECT_DIR$/ClientMain.py" beforeDir="false" afterPath="$PROJECT_DIR$/ClientMain.py" afterDir="false" />
++    </list>
++    <option name="SHOW_DIALOG" value="false" />
++    <option name="HIGHLIGHT_CONFLICTS" value="true" />
++    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
++    <option name="LAST_RESOLUTION" value="IGNORE" />
++  </component>
++  <component name="Git.Settings">
++    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
++  </component>
++  <component name="MarkdownSettingsMigration">
++    <option name="stateVersion" value="1" />
++  </component>
++  <component name="ProjectColorInfo">{
++  &quot;associatedIndex&quot;: 6
++}</component>
++  <component name="ProjectId" id="2fK0R8TVu3lUL7s8x1TjiRjZ8Ai" />
++  <component name="ProjectViewState">
++    <option name="hideEmptyMiddlePackages" value="true" />
++    <option name="showLibraryContents" value="true" />
++  </component>
++  <component name="PropertiesComponent">{
++  &quot;keyToString&quot;: {
++    &quot;Python.BotClient.executor&quot;: &quot;Debug&quot;,
++    &quot;Python.ClientMain.executor&quot;: &quot;Debug&quot;,
++    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
++    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
++    &quot;last_opened_file_path&quot;: &quot;C:/Users/Yuval/Desktop/NetworkFinalProj/NetworkFinalProj&quot;,
++    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
++    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
++    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
++    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
++    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
++    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
++  }
++}</component>
++  <component name="RunManager">
++    <configuration default="true" type="DjangoTestsConfigurationType">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <envs>
++        <env name="PYTHONUNBUFFERED" value="1" />
++      </envs>
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="TARGET" value="" />
++      <option name="SETTINGS_FILE" value="" />
++      <option name="CUSTOM_SETTINGS" value="false" />
++      <option name="USE_OPTIONS" value="false" />
++      <option name="OPTIONS" value="" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="PyBehaveRunConfigurationType" factoryName="Behave">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="true" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="ADDITIONAL_ARGS" value="" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="PythonConfigurationType" factoryName="Python">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <envs>
++        <env name="PYTHONUNBUFFERED" value="1" />
++      </envs>
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="SCRIPT_NAME" value="" />
++      <option name="PARAMETERS" value="" />
++      <option name="SHOW_COMMAND_LINE" value="false" />
++      <option name="EMULATE_TERMINAL" value="false" />
++      <option name="MODULE_MODE" value="false" />
++      <option name="REDIRECT_INPUT" value="false" />
++      <option name="INPUT_FILE" value="" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="Python.FlaskServer">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="launchJavascriptDebuger" value="false" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="Tox" factoryName="Tox">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="docs" factoryName="Docutils task">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="docutils_input_file" value="" />
++      <option name="docutils_output_file" value="" />
++      <option name="docutils_params" value="" />
++      <option name="docutils_task" value="" />
++      <option name="docutils_open_in_browser" value="false" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="docs" factoryName="Sphinx task">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="docutils_input_file" value="" />
++      <option name="docutils_output_file" value="" />
++      <option name="docutils_params" value="" />
++      <option name="docutils_task" value="" />
++      <option name="docutils_open_in_browser" value="false" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="tests" factoryName="Autodetect">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="_new_additionalArguments" value="&quot;&quot;" />
++      <option name="_new_target" value="&quot;&quot;" />
++      <option name="_new_targetType" value="&quot;PATH&quot;" />
++      <method v="2" />
++    </configuration>
++    <configuration default="true" type="tests" factoryName="Doctests">
++      <module name="finalProjectNetwork" />
++      <option name="ENV_FILES" value="" />
++      <option name="INTERPRETER_OPTIONS" value="" />
++      <option name="PARENT_ENVS" value="true" />
++      <option name="SDK_HOME" value="" />
++      <option name="WORKING_DIRECTORY" value="" />
++      <option name="IS_MODULE_SDK" value="false" />
++      <option name="ADD_CONTENT_ROOTS" value="true" />
++      <option name="ADD_SOURCE_ROOTS" value="true" />
++      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
++      <option name="SCRIPT_NAME" value="" />
++      <option name="CLASS_NAME" value="" />
++      <option name="METHOD_NAME" value="" />
++      <option name="FOLDER_NAME" value="" />
++      <option name="TEST_TYPE" value="TEST_SCRIPT" />
++      <option name="PATTERN" value="" />
++      <option name="USE_PATTERN" value="false" />
++      <method v="2" />
++    </configuration>
++  </component>
++  <component name="SharedIndexes">
++    <attachedChunks>
++      <set>
++        <option value="bundled-python-sdk-50da183f06c8-2887949eec09-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-233.13135.95" />
++      </set>
++    </attachedChunks>
++  </component>
++  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
++  <component name="TaskManager">
++    <task active="true" id="Default" summary="Default task">
++      <changelist id="935d8257-b942-4bca-b4d3-c3f2d36c0c1b" name="Changes" comment="" />
++      <created>1713534450465</created>
++      <option name="number" value="Default" />
++      <option name="presentableId" value="Default" />
++      <updated>1713534450465</updated>
++      <workItem from="1713534451651" duration="73000" />
++      <workItem from="1713534526771" duration="66000" />
++      <workItem from="1713534685088" duration="15000" />
++      <workItem from="1713534702765" duration="334000" />
++      <workItem from="1713539711828" duration="31000" />
++      <workItem from="1713597512272" duration="12000" />
++      <workItem from="1713597526089" duration="52000" />
++      <workItem from="1713597753558" duration="20000" />
++      <workItem from="1713597775497" duration="129000" />
++      <workItem from="1713617172647" duration="15591000" />
++      <workItem from="1713636096712" duration="248000" />
++      <workItem from="1713636361847" duration="1015000" />
++    </task>
++    <task id="LOCAL-00001" summary="update ClientMain and BotClient">
++      <option name="closed" value="true" />
++      <created>1713636402450</created>
++      <option name="number" value="00001" />
++      <option name="presentableId" value="LOCAL-00001" />
++      <option name="project" value="LOCAL" />
++      <updated>1713636402450</updated>
++    </task>
++    <task id="LOCAL-00002" summary="updated == final ClientMain and BotClient">
++      <option name="closed" value="true" />
++      <created>1713637376934</created>
++      <option name="number" value="00002" />
++      <option name="presentableId" value="LOCAL-00002" />
++      <option name="project" value="LOCAL" />
++      <updated>1713637376934</updated>
++    </task>
++    <option name="localTasksCounter" value="3" />
++    <servers />
++  </component>
++  <component name="TypeScriptGeneratedFilesManager">
++    <option name="version" value="3" />
++  </component>
++  <component name="VcsManagerConfiguration">
++    <MESSAGE value="update ClientMain and BotClient" />
++    <MESSAGE value="updated == final ClientMain and BotClient" />
++    <option name="LAST_COMMIT_MESSAGE" value="updated == final ClientMain and BotClient" />
++  </component>
++  <component name="com.intellij.coverage.CoverageDataManagerImpl">
++    <SUITE FILE_PATH="coverage/NetworkFinalProj$ClientMain.coverage" NAME="ClientMain Coverage Results" MODIFIED="1713631387325" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
++    <SUITE FILE_PATH="coverage/NetworkFinalProj$BotClient.coverage" NAME="BotClient Coverage Results" MODIFIED="1713634287966" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
++  </component>
++</project>
+\ No newline at end of file
