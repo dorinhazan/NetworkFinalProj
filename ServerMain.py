@@ -176,9 +176,6 @@ class ServerMain:
 
                 print(f"{Colors.RED}Error broadcasting question to player {player_name} at {addr}: {e}")
 
-
-
-
     def collect_answers(self, active_players):
         """Collects answers from each active player within a specified timeout."""
         answers = {}
