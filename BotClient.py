@@ -86,6 +86,7 @@ class BotClient(ClientMain):
                     self.tcp_socket.close()  # Ensure the socket is closed before retrying
 
 
+
 if __name__ == "__main__":
     bot = BotClient()
     bot.run()
