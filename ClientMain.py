@@ -5,8 +5,7 @@ import random
 import time
 from inputimeout import inputimeout, TimeoutOccurred
 from Colors import Colors
-
-
+import os
 
 class ClientMain:
     def __init__(self):
@@ -82,87 +81,55 @@ class ClientMain:
         except Exception as e:
             print(f"{Colors.RED}Error communicating with server: {e}")
 
+    def ping_server(self):
+        response = os.system("ping -c 1 " + self.server_ip)
+        if response == 0:
+            return
+        else:
+            print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
+            self.tcp_socket.close()
+            self.listen_for_udp_broadcast()
+
+
     def game_mode(self):
         """Enters game mode - sending answers and receiving questions."""
         try:
             game_over_received = False
             while not game_over_received:
-                # Set a timeout for the select call, e.g., 10 seconds
-                readable, _, _ = select.select([self.tcp_socket], [], [], 10)
+                readable, _, _ = select.select([self.tcp_socket], [], [], None)
                 if self.tcp_socket in readable:
-                    try:
-                        message = self.tcp_socket.recv(1024).decode().strip()
-                        if message:
-                            print(f"\n{message}")
-                            if "you did not respond in time!" in message:
-                                continue
-                            if "Game over!" in message:
-                                game_over_received = True  # Set flag to indicate game over message received
-                                break
-                            if "True or false" in message:
-                                # Provide a prompt for the user to input their answer within 10 seconds
-                                try:
-                                    answer = inputimeout("Your answer (Y/1/T - for True || N/0/F - for False): ", timeout=10).strip().upper()
-                                    if answer in ['Y', '1', 'T', 'N', '0', 'F']:
-                                        self.tcp_socket.sendall(answer.encode())
-                                    else:
-                                        print(f"{Colors.YELLOW}Invalid input. Please insert Y/1/T - for True || N/0/F - for False")
-                                except TimeoutOccurred:
-                                    answer = 'no answer'
-                                    self.tcp_socket.sendall(answer.encode())
-                    except socket.timeout:
-                        print(f"{Colors.RED}Timeout waiting for message from the server.")
-                        break
-                else:
-                    print(f"{Colors.RED}No data received. Server may be unreachable.")
-                    break
+                    self.ping_server()
+                    message = self.tcp_socket.recv(1024).decode().strip()
+
+                    if message:
+                        print(f"\n{message}")
+                        if "you did not respond in time!" in message:
+                            continue
+                        if "Game over!" in message:
+                            game_over_received = True  # Set flag to indicate game over message received
+                            break
+                        if "True or false" in message:
+                            # Provide a prompt for the user to input their answer within 10 seconds
+                            answer = 'no answer'
+                            try:
+                                answer = inputimeout("Your answer (Y/1/T - for True || N/0/F - for False): ",timeout=10).strip().upper()
+                                if answer in ['Y', '1', 'T', 'N', '0', 'F']:
+                                    pass
+                                else:
+                                    print(f"{Colors.YELLOW}Invalid input. Please insert Y/1/T - for True || N/0/F - for False")
+
+                            except Exception as e:
+                                answer = 'no answer'
+                            finally:
+                                self.tcp_socket.sendall(answer.encode())
         except Exception as e:
+
             print(f"{Colors.RED}An error occurred: {e}")
 
         finally:
             print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
-
-    # def game_mode(self):
-    #     """Enters game mode - sending answers and receiving questions."""
-    #     try:
-    #         game_over_received = False
-    #         while not game_over_received:
-    #             readable, _, _ = select.select([self.tcp_socket], [], [], None)
-    #             if self.tcp_socket in readable:
-    #                 message = self.tcp_socket.recv(1024).decode().strip()
-    #
-    #                 if message:
-    #                     print(f"\n{message}")
-    #                     if "you did not respond in time!" in message:
-    #                         continue
-    #                     if "Game over!" in message:
-    #                         game_over_received = True  # Set flag to indicate game over message received
-    #                         break
-    #                     if "True or false" in message:
-    #                         # Provide a prompt for the user to input their answer within 10 seconds
-    #                         answer = 'no answer'
-    #                         try:
-    #                             answer = inputimeout("Your answer (Y/1/T - for True || N/0/F - for False): ",timeout=10).strip().upper()
-    #                             if answer in ['Y', '1', 'T', 'N', '0', 'F']:
-    #                                 pass
-    #                             else:
-    #                                 print(f"{Colors.YELLOW}Invalid input. Please insert Y/1/T - for True || N/0/F - for False")
-    #
-    #                         except Exception as e:
-    #                             answer = 'no answer'
-    #                         finally:
-    #                             self.tcp_socket.sendall(answer.encode())
-    #     except Exception as e:
-    #
-    #         print(f"{Colors.RED}An error occurred: {e}")
-    #
-    #     finally:
-    #         print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
-    #
-    #         self.tcp_socket.close()
-    #         self.listen_for_udp_broadcast()
 
 
     def run(self):
