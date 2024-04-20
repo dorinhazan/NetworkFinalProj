@@ -3,10 +3,9 @@ import select
 import struct
 import random
 import time
-from inputimeout import inputimeout
+from inputimeout import inputimeout, TimeoutOccurred
 from Colors import Colors
-
-
+import os
 
 class ClientMain:
     def __init__(self):
@@ -68,10 +67,7 @@ class ClientMain:
             if magic_cookie == 0xabcddcba and message_type == 0x2:
                 self.server_ip = addr[0]
                 self.server_port = server_port
-
-                print(
-
-                    f"Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
+                print(f"Received offer from server Mystic at address {self.server_ip}, attempting to connect...")
 
                 udp_socket.close()
                 break
@@ -85,6 +81,15 @@ class ClientMain:
         except Exception as e:
             print(f"{Colors.RED}Error communicating with server: {e}")
 
+    def ping_server(self):
+        response = os.system("ping -c 1 " + self.server_ip)
+        if response == 0:
+            return
+        else:
+            print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
+            self.tcp_socket.close()
+            self.listen_for_udp_broadcast()
+
 
     def game_mode(self):
         """Enters game mode - sending answers and receiving questions."""
@@ -93,7 +98,9 @@ class ClientMain:
             while not game_over_received:
                 readable, _, _ = select.select([self.tcp_socket], [], [], None)
                 if self.tcp_socket in readable:
+                    self.ping_server()
                     message = self.tcp_socket.recv(1024).decode().strip()
+
                     if message:
                         print(f"\n{message}")
                         if "you did not respond in time!" in message:
@@ -121,13 +128,13 @@ class ClientMain:
 
         finally:
             print(f"{Colors.BOLD}Server disconnected, listening for offer requests...")
-
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
 
 
     def run(self):
         while True:
+            time.sleep(1)
             try:
                 self.name = random.choice(self.player_names)
                 self.listen_for_udp_broadcast()

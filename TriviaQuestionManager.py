@@ -1,6 +1,10 @@
 import random
 
 class TriviaQuestionManager:
+    """
+    Manages a collection of trivia questions related to biblical events and figures.
+    This class provides functionality to randomly select trivia questions from a predefined list.
+    """
     def __init__(self):
         self.questions = [
             {"text": "Moses was the first king of Israel.", "is_true": False},
@@ -27,6 +31,7 @@ class TriviaQuestionManager:
 
     def get_random_question(self):
         """Returns a random trivia question and its answer."""
+        # Randomly choose one question from the list of questions.
         question = random.choice(self.questions)
         return question["text"], question["is_true"]
 

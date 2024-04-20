@@ -27,6 +27,6 @@ class BotClientManager:
 
 # Example usage
 if __name__ == "__main__":
-    num_bots = 5  # Define the number of bot clients you want to create
+    num_bots = 3  # Define the number of bot clients you want to create
     bot_manager = BotClientManager(num_bots)
     bot_manager.run()

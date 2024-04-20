@@ -7,8 +7,6 @@ import random
 from struct import pack
 from concurrent.futures import ThreadPoolExecutor
 from Colors import Colors
-from GameStatistics import GameStatistics
-
 from TriviaQuestionManager import TriviaQuestionManager
 
 
@@ -24,13 +22,10 @@ class ServerMain:
         self.game_active = False  # Flag to check if a game is currently active
         self.player_names_server = []
 
-        self.game_stats = GameStatistics()
-
-        self.add_number = list(range(1, 501))  # Helper list for naming conflicts
-        self.executor = ThreadPoolExecutor(max_workers=30)  # Executor for handling client threads
+        self.add_number = list(range(1, 501))
+        self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load
 
         self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
-
         self.game_stats = defaultdict(list)  # Tracks scores for each game
         self.player_scores = defaultdict(int)  # Tracks overall scores for each player
         self.game_count = 0
@@ -144,7 +139,7 @@ class ServerMain:
                     players_list = ', '.join(players_names[:-1]) + ' and ' + players_names[-1]
                 else:
                     players_list = players_names[0]
-                message = f"\n\nRound {round_number}, played by {players_list}:\n{question}"
+                message = f"{Colors.PASTEL_PEACH}{Colors.UNDERLINE}Round {round_number}, played by {players_list}:\n{Colors.END}{Colors.PASTEL_PEACH}{question}"
 
             self.broadcast_question(active_players, message)
             answers = self.collect_answers(active_players)
@@ -152,9 +147,9 @@ class ServerMain:
 
             if len(active_players) == 1 and len(winners) == 0:
                 round_number += 1
-            elif len(active_players) > 1 and len(winners) > 1:
-                round_number += 1
-            elif len(active_players) == 2 and len(winners) == 1:
+
+            elif len(active_players) > 1 and len(winners) != 1:
+
                 round_number += 1
             else:
                 break  # Exit loop if one player is left
@@ -204,6 +199,7 @@ class ServerMain:
     def evaluate_answers(self, answers, active_players, correct_answer):
         """Evaluates the collected answers and updates the list of active players, with specific output formatting."""
         winners = []
+        no_correct_answers = []
         result_messages = {}
         current_game_scores = defaultdict(int)
 
@@ -215,11 +211,12 @@ class ServerMain:
                 self.player_scores[player_name] += 1  # Update overall score
                 result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is correct!"
             elif answer is None:
-                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!"
+                no_correct_answers.append(addr)
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!{Colors.END}"
             else:
+                no_correct_answers.append(addr)
                 result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is incorrect!"
 
-        # Determine the winner of the game
         if len(winners) == 1:
             winner_addr = winners[0]
             winner_name = active_players[winner_addr][0]
@@ -227,11 +224,13 @@ class ServerMain:
 
         broadcast_message = "\n".join(result_messages.values()) + "\n"
 
-        # Remove players who answered incorrectly from active_players for the next round
-        for addr in list(
-                active_players.keys()):
-            if addr not in winners:
-                del active_players[addr]
+
+        if len(no_correct_answers) != len(active_players):
+            # Remove players who answered incorrectly from active_players for the next round
+            for addr in list(active_players.keys()):  # Convert to list to avoid 'dictionary changed size during iteration' error
+                if addr not in winners:
+                    del active_players[addr]
+
 
         # Broadcast the message to all remaining players
         for addr in self.clients.keys():
@@ -239,7 +238,6 @@ class ServerMain:
                 client_socket = self.clients[addr][1]
                 client_socket.sendall(broadcast_message.encode('utf-8'))
             except Exception as e:
-
                 print(f"{Colors.RED}Failed to send result message: {self.clients[addr][0]} {e}")
 
 
