@@ -5,6 +5,7 @@ from ClientMain import ClientMain
 from Colors import Colors
 
 
+
 class BotClient(ClientMain):
     """
     BotClient extends ClientMain to interact with a game server automatically.

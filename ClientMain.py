@@ -172,7 +172,6 @@ class ClientMain:
             self.tcp_socket.close()
             self.listen_for_udp_broadcast()
 
-
     def run(self):
         """
         Runs the client session. This method is the entry point for the client logic, orchestrating the
