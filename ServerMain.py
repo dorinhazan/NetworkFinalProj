@@ -26,6 +26,9 @@ class ServerMain:
         self.game_stats = defaultdict(list)  # Tracks scores for each game
         self.player_scores = defaultdict(int)  # Tracks overall scores for each player
         self.game_count = 0
+        self.server_running = True
+        self.tcp_socket_server = None
+
 
 
     def start_udp_broadcast(self):
@@ -33,7 +36,7 @@ class ServerMain:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as udp_socket:
             udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-            while self.broadcasting:
+            while self.server_running:
                 # Repack the message with the current TCP port
                 message = pack('!Ib32sH', 0xabcddcba, 0x2, self.server_name.encode('utf-8'), self.tcp_port)
                 udp_socket.sendto(message, ('<broadcast>', self.udp_broadcast_port))
@@ -41,6 +44,7 @@ class ServerMain:
     def accept_tcp_connections(self):
         """Accepts TCP connections from clients using a ThreadPoolExecutor."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_socket:
+            self.tcp_socket_server = tcp_socket
             bound = False
             attempts = 0
             while not bound and attempts < 50:
@@ -74,14 +78,15 @@ class ServerMain:
 
         while not self.game_active:
             tcp_socket.settimeout(1)  # Short timeout to periodically check if game has started
-            try:
-                client_socket, addr = tcp_socket.accept()
-                self.executor.submit(self.handle_client, client_socket, addr)
-                if not first_client_connected:
-                    first_client_connected = True
-                    Timer(10.0, stop_accepting_new_connections).start()
-            except socket.timeout:
-                continue
+            while self.server_running:
+                try:
+                    client_socket, addr = tcp_socket.accept()
+                    self.executor.submit(self.handle_client, client_socket, addr)
+                    if not first_client_connected:
+                        first_client_connected = True
+                        Timer(10.0, stop_accepting_new_connections).start()
+                except socket.timeout:
+                    continue
 
     def handle_client(self, client_socket, addr):
         """Handles communication with a connected client."""
@@ -96,10 +101,10 @@ class ServerMain:
                 self.clients[addr] = (player_name, client_socket)
                 self.player_names_server.append(player_name)
 
-
         except Exception as e:
-
             print(f"{Colors.RED}Failed to handle client {addr}: {e}")
+
+
 
 
 
@@ -118,14 +123,14 @@ class ServerMain:
 
         while len(active_players) >= 1:
             question, correct_answer = self.trivia_manager.get_random_question()
-            question =f'{Colors.BOLD}True or false: {question}\n'
+            question =f'{Colors.BOLD}True or false:{question}{Colors.END}\n'
 
             if round_number == 1:
                 message = f"\n{Colors.PASTEL_PEACH}Welcome to the Mystic server, where we are answering trivia questions about the Bible.\n"
                 for idx, player_name in enumerate(self.clients.values(), start=1):
 
                     message += f"Player {idx}: {player_name[0]}\n"
-                message += "==\n"+ question +"\n"
+                message += "==\n"+ question
 
             else:
                 players_names = list(active_players.values())
@@ -207,22 +212,22 @@ class ServerMain:
                 winners.append(addr)
                 current_game_scores[player_name] += 1  # Award point for correct answer
                 self.player_scores[player_name] += 1  # Update overall score
-                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is correct!"
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is correct!{Colors.END}"
             elif answer is None:
                 no_correct_answers.append(addr)
-                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} did not respond on time!{Colors.END}"
+                result_messages[addr] = f"{Colors.END}{Colors.PASTEL_ORANGE}{player_name} did not respond on time!{Colors.END}"
             else:
                 no_correct_answers.append(addr)
-                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is incorrect!"
+                result_messages[addr] = f"{Colors.PASTEL_ORANGE}{player_name} is incorrect!{Colors.END}"
 
         if len(winners) == 1:
             winner_addr = winners[0]
             winner_name = active_players[winner_addr][0]
             # Add a winning note to the winner's message
-            result_messages[winner_addr] += f" {winner_name} Wins!"
+            result_messages[winner_addr] += f" {Colors.PASTEL_ORANGE}{winner_name} Wins!{Colors.END}"
 
         # Compile the broadcast message from individual messages
-        broadcast_message = "\n".join(result_messages.values())+"\n"
+        broadcast_message = "\n"+"\n".join(result_messages.values())+"\n"
 
         if len(no_correct_answers) != len(active_players):
             # Remove players who answered incorrectly from active_players for the next round
@@ -306,7 +311,7 @@ class ServerMain:
             # Now sort the aggregated scores
             sorted_players = sorted(total_scores.items(), key=lambda item: item[1], reverse=True)
 
-            print("Ranking players by correct answers:")
+            print("Ranking players by correct answers in this game:")
             for rank, (player, score) in enumerate(sorted_players, 1):
                 print(f"{rank}. {player} - {score} correct answers")
 
@@ -315,8 +320,53 @@ class ServerMain:
         threading.Thread(target=self.accept_tcp_connections, daemon=True).start()
         self.start_udp_broadcast()
 
+    def shutdown_server(self):
+        """Shuts down the server and closes all active connections."""
+        self.server_running = False
+        self.game_active = False  # Stop the game
+
+        # Close all client sockets
+        for _, (player_name, client_socket) in self.clients.items():
+            print(f"Closing connection for {player_name}")
+
+            client_socket.close()
+
+        # Close the server socket
+        if self.tcp_socket_server:
+            print(f"{Colors.BLUE}Closing the server socket...{Colors.END}")
+            self.tcp_socket_server.close()
+
+        # Clear the clients dictionary
+        self.clients.clear()
+
+        # Shutdown the thread pool executor
+        self.executor.shutdown(wait=True)
+        print(f"{Colors.BLUE}Server has been shutdown cleanly.{Colors.END}")
+
+    # def shutdown_server(self):
+    #     """Shuts down the server and closes all active connections."""
+    #     self.broadcasting = False  # Stop broadcasting
+    #     self.game_active = False  # Stop the game
+    #
+    #     # Close all client sockets
+    #     for _, (player_name, client_socket) in self.clients.items():
+    #         print(f"Closing connection for {player_name}")
+    #         client_socket.close()
+    #
+    #     # Clear the clients dictionary
+    #     self.clients.clear()
+    #     # Shutdown the thread pool executor
+    #     self.executor.shutdown(wait=True)
+    #     if self.tcp_socket_server:
+    #         self.tcp_socket_server.close()
+    #     print(f"{Colors.BLUE}Server has been shutdown cleanly.{Colors.END}")
+
+
 
 # Starting the server
 if __name__ == "__main__":
     server = ServerMain()
-    server.start()
+    try:
+        server.start()
+    except KeyboardInterrupt:
+        server.shutdown_server()
