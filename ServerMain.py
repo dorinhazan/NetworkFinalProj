@@ -22,13 +22,10 @@ class ServerMain:
         self.broadcasting = True  # New attribute to control broadcasting
         self.game_active = False
         self.player_names_server = []
-
         self.game_stats = GameStatistics()
-
         self.add_number = list(range(1, 501))
         self.executor = ThreadPoolExecutor(max_workers=30)  # Adjust based on expected load
         self.player_names_server_lock = threading.Lock()  # Add a lock for synchronizing access
-
         self.game_stats = defaultdict(list)  # Tracks scores for each game
         self.player_scores = defaultdict(int)  # Tracks overall scores for each player
         self.game_count = 0
