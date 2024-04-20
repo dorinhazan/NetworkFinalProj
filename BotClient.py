@@ -44,8 +44,6 @@ class BotClient(ClientMain):
 
     def run(self):
         while True:
-            time.sleep(1)
-
             try:
                 self.name = "Bot:" + random.choice(self.player_names)
                 self.listen_for_udp_broadcast()
